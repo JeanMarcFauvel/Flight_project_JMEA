@@ -17,4 +17,4 @@ Les retards sur les vols sont catégorisés par les autorités américaines en 5
 - **Conditions météos extrêmes**
 - **Sécurité** : évacuation d'un terminal, réembarquement d'un vol pour un contrôle sécurité, contrôles de sécurité en panne ou surchargés
 
-A noter qu'en dehors du cas de météo extrême, une partie des retards NAS est due à la météo, ainsi que pour les arrivées tardives de l'avion.
+A noter qu'en dehors du cas de météo extrême, une partie des retards NAS est due à la météo, ainsi que pour les arrivées tardives de l'avion. Au final environ le tiers des retards de vols sont dus à la météo.
