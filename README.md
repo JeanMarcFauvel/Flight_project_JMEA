@@ -11,10 +11,10 @@ Dans une première phase, le développement et les tests se font sur un sous ens
 
 Les retards sur les vols sont catégorisés par les autorités américaines en 5 catégories :
 
-- $compagnie aérienne$ : la cause revient à la compagnie (problème d'équipage, de bagage, de maintenance, nettoyage, fueling)
-- $Arrivée tardive de l'avion$ qui doit faire le vol en raison d'un retard de celui-ci sur le vol précédent
-- $National Aviation System$ : retard dû aux décisions de l'autorité de contrôle du trafic aérien (densité du trafic, météo non extrême, opérations sur l'aéroport)
-- $Conditions météos extrêmes$
-- $Sécurité$ : évacuation d'un terminal, réembarquement d'un vol pour un contrôle sécurité, contrôles de sécurité en panne ou surchargés
+- **Compagnie aérienne** : la cause revient à la compagnie (problème d'équipage, de bagage, de maintenance, nettoyage, fueling)
+- **Arrivée tardive de l'avion** qui doit faire le vol en raison d'un retard de celui-ci sur le vol précédent
+- **National Aviation System** : retard dû aux décisions de l'autorité de contrôle du trafic aérien (densité du trafic, météo non extrême, opérations sur l'aéroport)
+- **Conditions météos extrêmes**
+- **Sécurité** : évacuation d'un terminal, réembarquement d'un vol pour un contrôle sécurité, contrôles de sécurité en panne ou surchargés
 
 A noter qu'en dehors du cas de météo extrême, une partie des retards NAS est due à la météo, ainsi que pour les arrivées tardives de l'avion.
