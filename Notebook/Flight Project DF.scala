@@ -108,8 +108,24 @@ dbutils.fs.ls("/FileStore/tables/flights").foreach(f => println(f.name))
 
 // COMMAND ----------
 
+// MAGIC %md
+// MAGIC ###Structure de données et méthodologie pipeline de preprocessing
+// MAGIC
+// MAGIC Ayant considéré les volumes de données à traiter, la potentielle complexité des opérations de préparation des données et de transformation. Ayant également considéré la nécessité de developper un code facile à maintenir et à auditer. Nous avons fait le choix de retenir comme struture de données les **dataframes spark** et d'effectuer des sauvegardes à chaque étape de transformation dans une base de données **delta lake** en suivant la méthodologie préconisée en 3 étapes :
+// MAGIC
+// MAGIC - bronze : ingestion des données brutes
+// MAGIC - silver : nettoyage / jointures
+// MAGIC - gold : feature engineering / agrégats
+// MAGIC
+// MAGIC Delta lake nous permettra de partitionner les données (par exemple sur le jour), de gérer des versions, ...
+// MAGIC
+// MAGIC **Point d'attention**
+// MAGIC Ce projet a une problématique particulière de gestion des dates. En effet, dans la fichiers flights (source AOTP), les heures de départ des vols sont réputés être des heures locales à l'aéroport de départ. Par contre, les balises météo sont tracées (source QCLCD) avec des heures UTC. Pour permettre la jointure puis le traitement de ces deux fichiers il convient d'harmoniser. La sécurité et solidité dans le temps, veut que l'on convertisse toutes les heures locales en heures UTC.
+
+// COMMAND ----------
+
 // =======================================================
-// Schémas EXACTS d’après ton descriptif
+// Schémas des deux fichiers sur la base de lectures en csv
 // =======================================================
 
 // flights.csv
@@ -178,10 +194,12 @@ val weatherSchema = StructType(Seq(
 ))
 
 // =======================================================
-// Helpers
+// Création de fonctions utilitaires
 // =======================================================
 
 // Flights: construit les timestamps planifiés sans référence circulaire
+// hhmm normalise les heures en format sur 4 caractères. Par ex : 5 devient 0005, 930 devient 0930...
+// depTS création d'un timestamp par concaténation de la date extraite de FL_DATE et de hhmm
 def withScheduledTimestamps(df: DataFrame): DataFrame = {
   val hhmm  = lpad(col("CRS_DEP_TIME").cast("string"), 4, "0")
   val depTs = to_timestamp(
@@ -214,7 +232,8 @@ def withWeatherTimestampsNoTZ(df: DataFrame): DataFrame = {
 def addYearMonth(df: DataFrame, tsCol: String): DataFrame =
   df.withColumn("year", year(col(tsCol))).withColumn("month", month(col(tsCol)))
 
-// Active/désactive l’overwrite du schéma pendant le dev
+// fonction d'écriture dans les tables delta
+// Active/désactive l’overwrite du schéma pendant le dev tant que les schémas de fichiers outuput ne sont pas stabilisés (A retirer en prod)
 val DEV = true
 
 def writeDelta(df: DataFrame, path: String, parts: Seq[String], overwriteSchemaInDev: Boolean = DEV): Unit = {
@@ -624,4 +643,120 @@ println(s"Lignes JT: " + spark.read.format("delta").load(jtPath).count)
 // COMMAND ----------
 
 // MAGIC %md
-// MAGIC
+// MAGIC ###Contrôle de la structure de JT
+
+// COMMAND ----------
+
+// ========================
+// Contrôle structure JT
+// ========================
+import org.apache.spark.sql.{DataFrame, Column}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+
+// 👉 ajuste si besoin (si tu as écrit un autre Th)
+val JT_PATH = "dbfs:/delta/gold/JT_th60"
+
+// 1) Lecture
+val jt = spark.read.format("delta").load(JT_PATH)
+
+// 2) Schéma général
+println("=== JT.printSchema ===")
+jt.printSchema()
+
+// 3) Validations de structure (F struct, Wo/Wd arrays de structs, C int)
+import spark.implicits._
+
+case class Check(name: String, ok: Boolean, detail: String)
+
+def checkJT(df: DataFrame): Seq[Check] = {
+  val schema = df.schema
+
+  def hasField(name: String) = schema.fieldNames.contains(name)
+
+  val fType   = if (hasField("F"))  Some(schema("F").dataType)  else None
+  val woType  = if (hasField("Wo")) Some(schema("Wo").dataType) else None
+  val wdType  = if (hasField("Wd")) Some(schema("Wd").dataType) else None
+  val cType   = if (hasField("C"))  Some(schema("C").dataType)  else None
+
+  val fOk = fType.exists(_.isInstanceOf[StructType])
+
+  // ✅ éviter le double `_` → matcher le DataType
+  val cOk = cType.exists {
+    case IntegerType | ShortType | ByteType => true   // on tolère petit entier
+    case _                                   => false
+  }
+
+  def arrayStructInfo(dtOpt: Option[DataType], expectedHourPrefix: String): (Boolean, String) = dtOpt match {
+    case Some(ArrayType(StructType(fields), _)) =>
+      val names = fields.map(_.name).toSet
+      val hasHBack = names.contains("h_back")
+      val hasHour  = names.exists(_.startsWith(s"${expectedHourPrefix}_hour_utc"))
+      val detail   = s"elem fields = [${fields.map(f => s"${f.name}:${f.dataType.simpleString}").mkString(", ")}]"
+      (hasHBack && hasHour, detail)
+    case Some(other) =>
+      (false, s"type=${other.simpleString} (attendu array<struct<...>>)")
+    case None =>
+      (false, "absent")
+  }
+
+  val (woOk, woDetail) = arrayStructInfo(woType, "o")
+  val (wdOk, wdDetail) = arrayStructInfo(wdType, "d")
+
+  Seq(
+    Check("F is struct", fOk, s"type=${fType.map(_.simpleString).getOrElse("absent")}"),
+    Check("Wo is array<struct> (h_back, o_*)", woOk, woDetail),
+    Check("Wd is array<struct> (h_back, d_*)", wdOk, wdDetail),
+    Check("C is integer-like (label)", cOk, s"type=${cType.map(_.simpleString).getOrElse("absent")}")
+  )
+}
+
+// Utilisation (inchangée)
+val checks = checkJT(jt).toDF
+println("=== Validations ===")
+checks.show(truncate=false)
+
+
+// 4) Échantillon lisible
+println("=== F (sample) ===")
+jt.select($"F").limit(3).show(truncate=false)
+
+println("=== Tailles Wo/Wd (sample) ===")
+jt.select(size($"Wo").as("Wo_len"), size($"Wd").as("Wd_len"), $"C").limit(10).show(truncate=false)
+
+// Affiche les 3 premières entrées Wo/Wd d’une ligne aléatoire
+val one = jt.orderBy(rand()).limit(1).cache()
+println("=== Un enregistrement (3 premières entrées Wo & Wd) ===")
+one.select(
+  $"F",
+  expr("slice(Wo, 1, 3)").as("Wo_head"),
+  expr("slice(Wd, 1, 3)").as("Wd_head"),
+  $"C"
+).show(truncate=false)
+
+// 5) Distribution des longueurs Wo/Wd (pour vérifier la couverture jusqu’à 13)
+println("=== Distribution des tailles Wo ===")
+jt.select(size($"Wo").as("Wo_len"))
+  .groupBy("Wo_len").count()
+  .orderBy(desc("count"))
+  .show(20, truncate=false)
+
+println("=== Distribution des tailles Wd ===")
+jt.select(size($"Wd").as("Wd_len"))
+  .groupBy("Wd_len").count()
+  .orderBy(desc("count"))
+  .show(20, truncate=false)
+
+// (Option) Vérifie que les offsets sont bien dans [0..12] sur un échantillon
+println("=== Offsets Wo (échantillon 1000 vols) ===")
+jt.limit(1000)
+  .selectExpr("explode_outer(Wo) as w")
+  .groupBy("w.h_back").count()
+  .orderBy("w.h_back")
+  .show(20, truncate=false)
+
+
+// COMMAND ----------
+
+// MAGIC %md
+// MAGIC Nous avons bien en sortie la structure attendue sous la forme d'un tuple (F, Wo, Wd, C) où F est le fichier flights, Wo les données weather à l'aéroport d'origine sur 12 heures avant le départ du vol, Wd les données weather à l'aéroport d'arrivée sur les 12 heures avant l'arrivée du vol, C un booléen qui détermine si le vol était en retard ou pas. On été ajoutée l'année et le mois identifiant les fichiers d'origine.
