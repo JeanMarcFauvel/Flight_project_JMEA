@@ -216,21 +216,21 @@ def withScheduledTimestamps(df: DataFrame): DataFrame = {
     .withColumn("CRS_ARR_TS", arrTs)
 }
 
-// Weather Bronze: parse Date/Time → timestamp local “naïf”
+// Weather Bronze: parse Date/Time → timestamp local “naïf” i.e sans prise en compte de fuseau horaire
 def withWeatherTimestampsNoTZ(df: DataFrame): DataFrame = {
-  val dateDigits = regexp_replace(col("Date"), "[^0-9]", "")
+  val dateDigits = regexp_replace(col("Date"), "[^0-9]", "") // ne conserve que les chiffres dans les dates
   val dateParsed = coalesce(
     to_date(dateDigits, "yyyyMMdd"),
     to_date(col("Date"), "yyyy-MM-dd")
-  )
+  ) // parse en format yyyy-MM-dd soit date Digits soit Date
   val timeDigits = regexp_replace(col("Time"), "[^0-9]", "")
   val timeHHmm   = lpad(timeDigits, 4, "0")
   val obsLocal   = to_timestamp(concat(date_format(dateParsed, "yyyy-MM-dd"), lit(" "), timeHHmm), "yyyy-MM-dd HHmm")
   df.withColumn("obs_local_naive", obsLocal)
-}
+} // génère un timestamp sans tenir compte des fuseaux horaires
 
 def addYearMonth(df: DataFrame, tsCol: String): DataFrame =
-  df.withColumn("year", year(col(tsCol))).withColumn("month", month(col(tsCol)))
+  df.withColumn("year", year(col(tsCol))).withColumn("month", month(col(tsCol))) // ajoute l'année et le mois en fin de ligne
 
 // fonction d'écriture dans les tables delta
 // Active/désactive l’overwrite du schéma pendant le dev tant que les schémas de fichiers outuput ne sont pas stabilisés (A retirer en prod)
@@ -293,19 +293,42 @@ val weatherSilverFilteredPath = s"$baseDeltaSilver/weather_filtered"
 // =========================
 // HELPERS analyse
 // =========================
-def missingness(df: DataFrame): DataFrame = {
-  val stringCols = df.schema.fields.collect { case StructField(n, StringType, _, _) => n }.toSet
-  val total = df.count()
-  val exprs = df.columns.map { c =>
-    val isBlank = if (stringCols.contains(c)) length(trim(col(c))) === 0 else lit(false)
-    sum( when(col(c).isNull.or(isBlank), 1).otherwise(0) ).cast("long").alias(c)
+def missingness(
+  df: DataFrame,
+  treatNaLiterals: Seq[String] = Seq("NA","N/A","NULL","null")
+): DataFrame = {
+  val schema = df.schema
+  val stringSet = schema.fields.collect { case StructField(n, StringType, _, _) => n }.toSet
+  val floatSet  = schema.fields.collect { case StructField(n, FloatType  , _, _) => n }.toSet
+  val doubleSet = schema.fields.collect { case StructField(n, DoubleType , _, _) => n }.toSet
+
+  def isMissing(c: String): Column = {
+    val baseNull = col(c).isNull
+    val blank    = if (stringSet.contains(c)) length(trim(col(c))) === 0 else lit(false)
+    val nan      = if (floatSet.contains(c) || doubleSet.contains(c)) isnan(col(c)) else lit(false)
+    val naLit    =
+      if (stringSet.contains(c) && treatNaLiterals.nonEmpty)
+        lower(trim(col(c))).isin(treatNaLiterals.map(_.toLowerCase): _*)
+      else lit(false)
+
+    baseNull.or(blank).or(nan).or(naLit)
   }
-  val wide = df.agg(exprs.head, exprs.tail:_*)
-  val arr  = array(df.columns.map(c => struct(lit(c).as("column"), col(c).cast("long").as("nulls"))):_*)
-  wide.select(explode(arr).as("kv"))
-      .select(col("kv.column"), col("kv.nulls"))
-      .withColumn("rows", lit(total))
-      .withColumn("null_pct", round(col("nulls")/col("rows")*100, 2))
+
+  val perColAggs: Seq[Column] =
+    df.columns.toSeq.map(c => sum( when(isMissing(c), 1).otherwise(0) ).cast("long").alias(c))
+  val rowsAgg: Column = count(lit(1)).cast("long").alias("__rows")
+  val allAggs: Seq[Column] = perColAggs :+ rowsAgg
+
+  // ✅ pas de ": _*" ambigu : head + tail
+  val wide = df.agg(allAggs.head, allAggs.tail: _*)
+
+  val cols = df.columns
+  val arr  = array(cols.map(c => struct(lit(c).as("column"), col(c).cast("long").as("nulls"))): _*)
+
+  wide
+    .select(explode(arr).as("kv"), col("__rows"))
+    .select(col("kv.column"), col("kv.nulls"), col("__rows").as("rows"))
+    .withColumn("null_pct", round(col("nulls")/col("rows")*100, 2))
 }
 
 // =========================
@@ -347,7 +370,7 @@ writeDelta(weatherBronze, weatherBronzePath, Seq("year","month"))
 // Flights: plan de nettoyage
 case class FlightsCleanPlan(dropCols: Seq[String], filterExpr: Column)
 def deriveFlightsPlan(df: DataFrame): FlightsCleanPlan = {
-  // règles issues de ton DQ : supprimer lignes annulées/diverties, puis colonnes CANCELLED/DIVERTED
+  // règles issues de l'article : supprimer lignes annulées/diverties, puis colonnes CANCELLED/DIVERTED
   val filterExpr = coalesce(col("CANCELLED"), lit(0.0)) === 0.0 && coalesce(col("DIVERTED"), lit(0.0)) === 0.0
   val toDrop = df.columns.intersect(Array("CANCELLED","DIVERTED"))
   FlightsCleanPlan(toDrop, filterExpr)
