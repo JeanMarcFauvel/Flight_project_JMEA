@@ -1,0 +1,20 @@
+# IntelliJ
+.idea/
+*.iml
+out/
+target/
+
+# OS
+.DS_Store
+
+# SBT
+project/project/
+project/target/
+
+# Data
+Data/**
+archive/**
+tmp/**
+# si tu veux garder le dossier vide dans Git :
+!Data/.gitkeep
+!archive/.gitkeep
