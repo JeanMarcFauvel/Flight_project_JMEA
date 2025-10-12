@@ -18,3 +18,53 @@ tmp/**
 # si tu veux garder le dossier vide dans Git :
 !Data/.gitkeep
 !archive/.gitkeep
+
+# --- Spark / Delta / Data artefacts ---
+# Tables Delta (chemin courant de sortie)
+delta/**
+spark-warehouse/
+metastore_db/
+derby.log
+
+!delta/.gitkeep
+
+# Dossiers internes Delta/Spark (où qu'ils soient)
+**/_delta_log/**
+**/_spark_metadata/**
+**/_checkpoints/**
+**/checkpoint/**
+**/.sparkStaging/**
+
+# Fichiers data/temporaires courants
+*.parquet
+*.orc
+*.avro
+*.crc
+_SUCCESS
+*.snappy
+*.lz4
+*.zstd
+*.deflate
+*._COPYING_*
+
+# Option: garder des petits samples (décommente si besoin)
+# !Data/samples/**
+# !Data/samples/**/*.parquet
+
+# --- Outils Scala/IDE (compléments utiles) ---
+.bsp/
+.bloop/
+.metals/
+.vscode/
+.worksheet/
+
+# --- Secrets / config locale ---
+.env
+.env.*
+credentials.sbt
+local.sbt
+*.jks
+*.p12
+*.pem
+*.crt
+*.key
