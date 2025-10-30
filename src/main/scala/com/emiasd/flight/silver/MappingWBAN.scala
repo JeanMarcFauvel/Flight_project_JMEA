@@ -9,7 +9,7 @@ import org.apache.spark.sql.functions._
 object MappingWBAN {
   // mapping CSV : WBAN,airport_id,timezone (IANA, ex: America/New_York)
   def readMapping(spark: SparkSession, path: String): DataFrame = {
-    spark.read.option("header", true).option("inferSchema", true).csv(path)
+    spark.read.option("header", "true").option("inferSchema", "true").csv(path)
       .withColumn("WBAN", upper(trim(col("WBAN"))))
       .withColumn("airport_id", col("airport_id").cast("int"))
       .withColumn("timezone", trim(col("timezone")))

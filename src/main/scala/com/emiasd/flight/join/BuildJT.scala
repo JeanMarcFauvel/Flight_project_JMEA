@@ -7,31 +7,43 @@ import org.apache.spark.sql.functions._
 
 
 object BuildJT {
+  // Colonnes météo alignées TIST
   private def selectWxCols(prefix: String) = Seq(
     col("obs_utc").as(s"${prefix}_ts"),
     col("SkyCondition").as(s"${prefix}_sky"),
+    col("WeatherType").as(s"${prefix}_wxType"),
     col("Visibility").cast("double").as(s"${prefix}_vis"),
-    col("DryBulbFarenheit").cast("double").as(s"${prefix}_tempF"),
+    col("TempC").cast("double").as(s"${prefix}_tempC"),
+    col("DewPointC").cast("double").as(s"${prefix}_dewC"),
     col("RelativeHumidity").cast("double").as(s"${prefix}_rh"),
-    col("WindSpeed").cast("double").as(s"${prefix}_wind"),
-    col("Altimeter").cast("double").as(s"${prefix}_altim")
+    col("WindSpeedKt").cast("double").as(s"${prefix}_windKt"),
+    col("WindDirection").cast("double").as(s"${prefix}_windDir"),
+    col("Altimeter").cast("double").as(s"${prefix}_altim"),
+    col("SeaLevelPressure").cast("double").as(s"${prefix}_slp"),
+    col("StationPressure").cast("double").as(s"${prefix}_stnp"),
+    col("HourlyPrecip").cast("double").as(s"${prefix}_precip")
   )
 
 
   def buildJT(spark: SparkSession, flightsEnriched: DataFrame, weatherSlim: DataFrame, thMinutes: Int): DataFrame = {
     import spark.implicits._
 
-
     // wxOrigin
     val wxOrigin = weatherSlim.select(
       col("airport_id").as("o_airport_id"),
       col("obs_utc"),
       col("SkyCondition"),
+      col("WeatherType"),
       col("Visibility"),
-      col("DryBulbFarenheit"),
+      col("TempC"),
+      col("DewPointC"),
       col("RelativeHumidity"),
-      col("WindSpeed"),
-      col("Altimeter")
+      col("WindSpeedKt"),
+      col("WindDirection"),
+      col("Altimeter"),
+      col("SeaLevelPressure"),
+      col("StationPressure"),
+      col("HourlyPrecip")
     )
 
     // wxDest
@@ -39,11 +51,17 @@ object BuildJT {
       col("airport_id").as("d_airport_id"),
       col("obs_utc"),
       col("SkyCondition"),
+      col("WeatherType"),
       col("Visibility"),
-      col("DryBulbFarenheit"),
+      col("TempC"),
+      col("DewPointC"),
       col("RelativeHumidity"),
-      col("WindSpeed"),
-      col("Altimeter")
+      col("WindSpeedKt"),
+      col("WindDirection"),
+      col("Altimeter"),
+      col("SeaLevelPressure"),
+      col("StationPressure"),
+      col("HourlyPrecip")
     )
 
     val f = flightsEnriched
@@ -67,11 +85,17 @@ object BuildJT {
             struct(
               col("o_ts"),
               col("o_sky"),
+              col("o_wxType"),
               col("o_vis"),
-              col("o_tempF"),
+              col("o_tempC"),
+              col("o_dewC"),
               col("o_rh"),
-              col("o_wind"),
-              col("o_altim")
+              col("o_windKt"),
+              col("o_windDir"),
+              col("o_altim"),
+              col("o_slp"),
+              col("o_stnp"),
+              col("o_precip")
             )
           ),
           asc = true
@@ -94,11 +118,17 @@ object BuildJT {
             struct(
               col("d_ts"),
               col("d_sky"),
+              col("d_wxType"),
               col("d_vis"),
-              col("d_tempF"),
+              col("d_tempC"),
+              col("d_dewC"),
               col("d_rh"),
-              col("d_wind"),
-              col("d_altim")
+              col("d_windKt"),
+              col("d_windDir"),
+              col("d_altim"),
+              col("d_slp"),
+              col("d_stnp"),
+              col("d_precip")
             )
           ),
           asc = true
@@ -112,16 +142,12 @@ object BuildJT {
     // F struct minimal (tu pourras enrichir)
     val withF = withC.select(
       struct(
-        col("UNIQUE_CARRIER").as("carrier"),
+        col("OP_CARRIER_AIRLINE_ID").as("carrier"),
         col("FL_NUM").as("flnum"),
         col("FL_DATE").as("date"),
-        col("ORIGIN").as("origin"),
-        col("DEST").as("dest"),
         col("origin_airport_id"),
         col("dest_airport_id"),
-        // (optionnel) pour garder l’heure planifiée brute:
         col("CRS_DEP_TIME").as("crs_dep_scheduled_hhmm"),
-        // les références de temps utilisées pour les joins / features:
         col("dep_ts_utc"),
         col("arr_ts_utc"),
         col("ARR_DELAY_NEW").as("arr_delay_new"),

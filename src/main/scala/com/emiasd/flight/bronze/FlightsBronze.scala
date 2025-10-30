@@ -32,6 +32,8 @@ object FlightsBronze {
       .withColumn("ARR_DELAY_NEW",        col("ARR_DELAY_NEW").cast("double"))
       .withColumn("CANCELLED",            col("CANCELLED").cast("int"))
       .withColumn("DIVERTED",             col("DIVERTED").cast("int"))
+      .withColumn("WEATHER_DELAY", col("WEATHER_DELAY").cast("double"))
+      .withColumn("NAS_DELAY",     col("NAS_DELAY").cast("double"))
 
     // tz origine + destination
     val f2 = f1
@@ -59,6 +61,7 @@ object FlightsBronze {
       .drop("airport_id")
 
     f4
+
 
   }
 }
