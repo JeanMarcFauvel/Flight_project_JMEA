@@ -6,7 +6,9 @@ import com.emiasd.flight.io.{Readers, Writers}
 import com.emiasd.flight.bronze.{FlightsBronze, WeatherBronze}
 import com.emiasd.flight.silver.{CleaningPlans, MappingWBAN, WeatherSlim}
 import com.emiasd.flight.join._
+import com.emiasd.flight.analysis.BronzeAnalysis
 import org.apache.spark.sql.functions._
+
 
 object Main {
   def main(args: Array[String]): Unit = {
@@ -29,6 +31,16 @@ object Main {
 
     Writers.writeDelta(flightsBronze.coalesce(2), paths.bronzeFlights, Seq("year","month"), overwriteSchema = true)
     Writers.writeDelta(weatherBronze.coalesce(2), paths.bronzeWeather, Seq("year","month"), overwriteSchema = true)
+
+    // === ANALYSE DES DONNÉES BRONZE → CSV ===
+    // Dossier local "analysis" au chemin absolu, créé s'il n'existe pas.
+    val qaOutDirFile = new java.io.File("analysis")
+    qaOutDirFile.mkdirs()
+    val qaOutDir = qaOutDirFile.getAbsolutePath
+
+    BronzeAnalysis.analyzeFlights(flightsBronze, qaOutDir)
+    BronzeAnalysis.analyzeWeather(weatherBronze, qaOutDir)
+
 
     // === SILVER ===
     val flightsPlan = CleaningPlans.deriveFlightsPlan(flightsBronze)

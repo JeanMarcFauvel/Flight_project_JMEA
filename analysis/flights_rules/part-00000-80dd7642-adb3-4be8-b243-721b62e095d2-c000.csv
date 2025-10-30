@@ -1,0 +1,5 @@
+check,rows
+bothZero -> arr<15 (OK),0
+bothZero -> arr>=15 (VIOL),28340
+nonZero -> arr>=15 (OK),42568
+nonZero -> arr<15 (VIOL),0

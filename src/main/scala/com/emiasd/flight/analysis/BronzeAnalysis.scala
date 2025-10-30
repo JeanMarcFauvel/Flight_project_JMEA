@@ -1,0 +1,103 @@
+package com.emiasd.flight.analysis
+
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+
+object BronzeAnalysis {
+
+  /** Expression “valeur manquante” adaptée au type */
+  private def missingExpr(colName: String, dt: DataType) = {
+    val c = col(colName)
+    dt match {
+      case DoubleType | FloatType =>
+        c.isNull || isnan(c)
+      case StringType =>
+        c.isNull || trim(c) === "" || lower(c) === "na" || lower(c) === "null"
+      case _ =>
+        c.isNull
+    }
+  }
+
+  /** Comptage des valeurs manquantes par colonne (NaN/NULL/vides selon le type) */
+  def nullsReport(df: DataFrame): DataFrame = {
+    val exprs = df.schema.fields.map { f =>
+      sum(when(missingExpr(f.name, f.dataType), 1).otherwise(0)).as(f.name)
+    } :+ count(lit(1)).as("_rows")
+    df.agg(exprs.head, exprs.tail: _*)
+  }
+
+  /** Comptage d’uniques sur un sous-ensemble de colonnes */
+  def uniquesReport(df: DataFrame, cols: Seq[String], approx: Boolean = true): DataFrame = {
+    val exprs = cols.filter(df.columns.contains).map { c =>
+      if (approx) approx_count_distinct(col(c)).as(c) else countDistinct(col(c)).as(c)
+    } :+ count(lit(1)).as("_rows")
+    df.agg(exprs.head, exprs.tail: _*)
+  }
+
+  /** Règle IFF demandée :
+   *  (WEATHER_DELAY==0 && NAS_DELAY==0)  <=>  ARR_DELAY_NEW < 15
+   * On renvoie un petit DataFrame synthèse.
+   */
+  def flightsIffRule(df: DataFrame): DataFrame = {
+    import df.sparkSession.implicits._
+
+    val bothZero_arrLT15 =
+      df.filter($"WEATHER_DELAY" === 0.0 && $"NAS_DELAY" === 0.0 && $"ARR_DELAY_NEW" < 15).count
+    val bothZero_arrGE15_viols =
+      df.filter($"WEATHER_DELAY" === 0.0 && $"NAS_DELAY" === 0.0 && $"ARR_DELAY_NEW" >= 15).count
+
+    val nonZero_arrGE15 =
+      df.filter(($"WEATHER_DELAY" =!= 0.0 || $"NAS_DELAY" =!= 0.0) && $"ARR_DELAY_NEW" >= 15).count
+    val nonZero_arrLT15_viols =
+      df.filter(($"WEATHER_DELAY" =!= 0.0 || $"NAS_DELAY" =!= 0.0) && $"ARR_DELAY_NEW" < 15).count
+
+    Seq(
+      ("bothZero -> arr<15 (OK)", bothZero_arrLT15),
+      ("bothZero -> arr>=15 (VIOL)", bothZero_arrGE15_viols),
+      ("nonZero -> arr>=15 (OK)", nonZero_arrGE15),
+      ("nonZero -> arr<15 (VIOL)", nonZero_arrLT15_viols)
+    ).toDF("check", "rows")
+  }
+
+  /** Analyse FLIGHTS Bronze + export CSV */
+  def analyzeFlights(df: DataFrame, outDir: String): Unit = {
+    import df.sparkSession.implicits._
+    println("=== ANALYSE FLIGHTS BRONZE ===")
+    println(s"Rows = ${df.count}")
+
+    val nulls = nullsReport(df)
+    val uniq  = uniquesReport(df, Seq(
+      "OP_CARRIER_AIRLINE_ID","FL_NUM","origin_airport_id","dest_airport_id","year","month"
+    ))
+    val iff   = flightsIffRule(df)
+
+    nulls.show(false); uniq.show(false); iff.show(false)
+
+    nulls.coalesce(1).write.mode("overwrite").option("header","true").csv(s"$outDir/flights_nulls")
+    uniq.coalesce(1).write.mode("overwrite").option("header","true").csv(s"$outDir/flights_uniques")
+    iff.coalesce(1).write.mode("overwrite").option("header","true").csv(s"$outDir/flights_rules")
+  }
+
+  /** Analyse WEATHER Bronze + export CSV (sur colonnes utiles) */
+  def analyzeWeather(df: DataFrame, outDir: String): Unit = {
+    println("=== ANALYSE WEATHER BRONZE ===")
+    println(s"Rows = ${df.count}")
+
+    val cols = Seq(
+      "airport_id","WBAN","obs_utc","SkyCondition","WeatherType","Visibility","TempC",
+      "DewPointC","RelativeHumidity","WindSpeedKt","WindDirection","Altimeter",
+      "SeaLevelPressure","StationPressure","HourlyPrecip","year","month"
+    ).filter(df.columns.contains)
+
+    val wx = if (cols.nonEmpty) df.select(cols.map(col): _*) else df
+
+    val nulls = nullsReport(wx)
+    val uniq  = uniquesReport(wx, Seq("airport_id","WBAN","year","month"))
+
+    nulls.show(false); uniq.show(false)
+
+    nulls.coalesce(1).write.mode("overwrite").option("header","true").csv(s"$outDir/weather_nulls")
+    uniq.coalesce(1).write.mode("overwrite").option("header","true").csv(s"$outDir/weather_uniques")
+  }
+}
