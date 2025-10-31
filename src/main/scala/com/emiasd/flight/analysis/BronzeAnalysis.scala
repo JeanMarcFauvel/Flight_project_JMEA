@@ -35,31 +35,6 @@ object BronzeAnalysis {
     df.agg(exprs.head, exprs.tail: _*)
   }
 
-  /** Règle IFF demandée :
-   *  (WEATHER_DELAY==0 && NAS_DELAY==0)  <=>  ARR_DELAY_NEW < 15
-   * On renvoie un petit DataFrame synthèse.
-   */
-  def flightsIffRule(df: DataFrame): DataFrame = {
-    import df.sparkSession.implicits._
-
-    val bothZero_arrLT15 =
-      df.filter($"WEATHER_DELAY" === 0.0 && $"NAS_DELAY" === 0.0 && $"ARR_DELAY_NEW" < 15).count
-    val bothZero_arrGE15_viols =
-      df.filter($"WEATHER_DELAY" === 0.0 && $"NAS_DELAY" === 0.0 && $"ARR_DELAY_NEW" >= 15).count
-
-    val nonZero_arrGE15 =
-      df.filter(($"WEATHER_DELAY" =!= 0.0 || $"NAS_DELAY" =!= 0.0) && $"ARR_DELAY_NEW" >= 15).count
-    val nonZero_arrLT15_viols =
-      df.filter(($"WEATHER_DELAY" =!= 0.0 || $"NAS_DELAY" =!= 0.0) && $"ARR_DELAY_NEW" < 15).count
-
-    Seq(
-      ("bothZero -> arr<15 (OK)", bothZero_arrLT15),
-      ("bothZero -> arr>=15 (VIOL)", bothZero_arrGE15_viols),
-      ("nonZero -> arr>=15 (OK)", nonZero_arrGE15),
-      ("nonZero -> arr<15 (VIOL)", nonZero_arrLT15_viols)
-    ).toDF("check", "rows")
-  }
-
   /** Analyse FLIGHTS Bronze + export CSV */
   def analyzeFlights(df: DataFrame, outDir: String): Unit = {
     import df.sparkSession.implicits._
@@ -70,13 +45,9 @@ object BronzeAnalysis {
     val uniq  = uniquesReport(df, Seq(
       "OP_CARRIER_AIRLINE_ID","FL_NUM","origin_airport_id","dest_airport_id","year","month"
     ))
-    val iff   = flightsIffRule(df)
-
-    nulls.show(false); uniq.show(false); iff.show(false)
 
     nulls.coalesce(1).write.mode("overwrite").option("header","true").csv(s"$outDir/flights_nulls")
     uniq.coalesce(1).write.mode("overwrite").option("header","true").csv(s"$outDir/flights_uniques")
-    iff.coalesce(1).write.mode("overwrite").option("header","true").csv(s"$outDir/flights_rules")
   }
 
   /** Analyse WEATHER Bronze + export CSV (sur colonnes utiles) */

@@ -47,6 +47,16 @@ object Main {
     val flightsSilver = CleaningPlans.cleanFlights(flightsBronze, flightsPlan)
     Writers.writeDelta(flightsSilver.coalesce(2), paths.silverFlights, Seq("year","month"), overwriteSchema = true)
 
+    // === ANALYSE SILVER ===
+    import com.emiasd.flight.analysis.SilverAnalysis
+
+    val silverQaDir = "analysis/silver"
+    new java.io.File(silverQaDir).mkdirs()
+
+    // Recharge ou réutilise flightsCleaned
+    val flightsSilverCheck = Readers.readDelta(spark, paths.silverFlights)
+    SilverAnalysis.analyzeFlights(flightsSilverCheck, silverQaDir)
+
     // Météo → UTC par offset fixe d'heures (pas de DST)
     val weatherSlim = WeatherSlim.enrichWithUTC(spark, weatherBronze, paths.mapping)
     Writers.writeDelta(weatherSlim.coalesce(2), paths.silverWeatherFiltered, Seq("year","month"), overwriteSchema = true)
